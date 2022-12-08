@@ -1,8 +1,9 @@
 #import sys
 #sys.path.insert(0,"/workspace/bt")
 
-import bt
+import numpy as np
 import pandas as pd
+import bt
 
 print('bt version : ', bt.__version__)
 
@@ -82,30 +83,81 @@ class SelectDualMomentum(bt.Algo):
         target.temp['selected'] = selected.drop_duplicates()
         return True
     
-class WeighAvgMomentumScore(bt.Alog):
-    def __init__(self, run_on_end_of_period=True, lookback=pd.DateOffset(months=1), lag=pd.DateOffset(days=1)):
-        super(WeighAvgMomentumScore, self).__init__()
-        self.run_on_end_of_period = run_on_end_of_period
+class WeighAMSwithCash(bt.Algo):
+    """
+    자산의 평균모멘텀점수를 계산하여 비중을 할당한다.
+        Args:
+            lookback : 반추기간(기본값: 12개월)
+            lag : 리밸런스 지연일(기본값: 1일)
+            cash_weight : 현금 비중(기본값: 0)
+        Returns:
+            모멘텀점수에 따른 비중을 반환
+    """
+    def __init__(self, lookback=12, lag=1, cash_weight=0.0):
+        super(WeighAMSwithCash, self).__init__()
         self.lookback = lookback
         self.lag = lag
+        self.cash_weight = cash_weight
     
+    # 12개월 평균모멘텀 스코어 산출    
     def __avg_momentum_score(self, prc_monthly):
-        
-        
-        return momentum_score
+        sumOfmomentum = 0
+        sumOfscore = 0
+        for i in range(1, self.lookback+1):
+            sumOfmomentum = prc_monthly / prc_monthly.shift(i) + sumOfmomentum
+            sumOfscore = np.where(prc_monthly / prc_monthly.shift(i) > 1, 1,0) + sumOfscore
+    
+        sumOfmomentum[sumOfmomentum > 0] = sumOfscore/self.lookback
+        return sumOfmomentum        
     
     def __call__(self, target):
         selected = target.temp['selected']
-        end = target.now - self.lag
-        start = end - self.lookback
+        end = target.now - pd.DateOffset(days=self.lag)
+        start = end - pd.DateOffset(months=self.lookback+1)
+        #print('start day={}, end_day={}'.format(start, end))
         prc = target.universe.loc[start:end, selected]
+        #print('price \n', prc)
         prc_monthly = prc.copy()
-        if (self.run_on_end_of_period):
-            prc_monthly = prc_monthly.resample('M').last().dropna()
-        else:
-            prc_monthly = prc_monthly.resample('MS').last().dropna()
-            
-        momentum_score = self.__avg_momentum_score(prc_monthly)
+        prc_monthly = prc_monthly.resample('BM').last().dropna()
+        #print('monthly prc \n', prc_monthly)
         
-        target.temp['weights'] = 
+        momentum_score = self.__avg_momentum_score(prc_monthly)
+        #print('momentum score \n', momentum_score)
+        #weights = pd.Series(momentum_score.loc[momentum_score.index.max()] * 1/(len(selected)-1), index=momentum_score.columns)
+        
+        assets_count = len(selected) - 1
+        weights = pd.Series(momentum_score.loc[momentum_score.index.max()], index=momentum_score.columns)
+        weights = weights * (1-self.cash_weight) / assets_count
+        
+        weights['cash'] = self.cash_weight
+        weights['cash'] = 1 - weights.sum()
+        
+        #print('before weight \n', weights)
+        #weights[-1] = 1 - (weights.sum() - weights[-1])
+        target.temp['weights'] = weights
+        #print('after weight \n', weights)
+        #print('weights \n', target.temp['weights'])
         return True
+    
+class WeighInvVol_monthly(bt.Algo):
+    """
+    
+    
+    """
+    def __init__(self, lookback=12, lag=1):
+        super(WeighInvVol_monthly, self).__init__()
+        self.lookback = lookback;
+        self.lag = lag
+        
+    def __call__(self, target):
+        selected = target.temp['selected']
+        
+        end = target.now - pd.DateOffset(days=self.lag)
+        start = end - pd.DateOffset(months=self.lookback+1)
+        #print('start day={}, end_day={}'.format(start, end))
+        prc = target.universe.loc[start:end, selected].resample('BM').last()
+        #print('monthly prc \n', prc)
+        target.temp['weights'] = (bt.ffn.calc_inv_vol_weights(prc.to_returns().dropna())).dropna()
+        return True
+        
+        
