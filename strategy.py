@@ -131,7 +131,7 @@ class WeighAMS(bt.Algo):
         # 전략수익률 데이터 추출 & 모멘텀 가공
         if (self.ylookback != 0):
             start = end - pd.DateOffset(months=self.ylookback)
-            while not (start in self.returns.index):
+            while not (start in target.universe.index):
                 start = start - pd.DateOffset(days=self.lag)
             prc = self.returns.loc[start:end]
             prc_monthly = prc.copy()
@@ -183,7 +183,7 @@ class WeighInvVolByMonth(bt.Algo):
         
         # 전략수익률 데이터 추출 & 모멘텀 가공
         if (self.ylookback != 0):
-            while not (end in self.returns.index):
+            while not (end in target.universe.index):
                 end = end - pd.DateOffset(days=self.lag)
             start = end - pd.DateOffset(months=self.ylookback)
             print('1start={}, end={}'.format(start, end))            
