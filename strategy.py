@@ -121,75 +121,69 @@ class WeighAMSwithCash(bt.Algo):
     
     def __call__(self, target):
         selected = target.temp['selected']
+        
+        # 투자자산 반추기간 데이터 추출
         end = target.now - pd.DateOffset(days=self.lag)
-        start = end - pd.DateOffset(months=self.lookback+1)
-        #print('start day={}, end_day={}'.format(start, end))
+        while not (end in target.universe.index):
+            end = end - pd.DateOffset(days=self.lag)
+        start = end - pd.DateOffset(months=self.lookback)
+        while not (start in target.universe.index):
+            start = start - pd.DateOffset(days=self.lag)
         prc = target.universe.loc[start:end, selected]
-        #print('price \n', prc)
-        prc_monthly = prc.copy()
+
+        # 투자자산 모멘텀 산출
+        prc_monthly = prc.copy().drop(['cash'], axis=1)
         prc_monthly = prc_monthly.resample('BM').last().dropna()
-        #print('monthly prc \n', prc_monthly)
+        weights = WeighAMSwithCash.avg_momentum_score(prc_monthly, self.lookback)
         
-        momentum_score = WeighAMSwithCash.avg_momentum_score(prc_monthly, self.lookback)
-        #print('momentum score \n', momentum_score)
-        #weights = pd.Series(momentum_score.loc[momentum_score.index.max()] * 1/(len(selected)-1), index=momentum_score.columns)
-        
-        assets_count = len(selected) - 1
-        weights = pd.Series(momentum_score.loc[momentum_score.index.max()], index=momentum_score.columns)
-        weights = weights * (1-self.cash_weight) / assets_count
-        
-        weights['cash'] = self.cash_weight
+        # 투자자산 및 현금 비중 결정
+        weights = weights.loc[weights.index.max()]
+        weights = weights * (1-self.cash_weight) / len(weights.index)
         weights['cash'] = 1 - weights.sum()
         
-        #print('before weight \n', weights)
-        #weights[-1] = 1 - (weights.sum() - weights[-1])
         target.temp['weights'] = weights
-        #print('after weight \n', weights)
-        #print('weights \n', target.temp['weights'])
         return True
 
 class WeighAMSwithYieldCurve(bt.Algo):
     """
     
     """
-    def __init__(self, lookback=12, lag=1, ycurve_lookback=6):
+    def __init__(self, lookback=12, lag=1, ylookback=6):
         super(WeighAMSwithYieldCurve, self).__init__()
         self.lookback = lookback
         self.lag = lag        
-        self.ycurve_lookback = ycurve_lookback
+        self.ylookback = ylookback
         
     def __call__(self, target):
         selected = target.temp['selected']
-        print('selected index \n', selected.index)
-        # 수익률 곡선 모멘텀 산출용 데이터 추출 
+        # 전략수익률 데이터 추출 & 모멘텀 가공
         end = target.now - pd.DateOffset(days=self.lag)
-        start = end - pd.DateOffset(months=self.ycurve_lookback+1)
-        print('start day={}, end_day={}'.format(start, end))
-        prc = target.universe.loc[start:end, selected]
-        print('price \n', prc)
+        while not (end in target.universe.index):
+            end = end - pd.DateOffset(days=self.lag)
+        start = end - pd.DateOffset(months=self.ylookback)
+        while not (start in target.universe.index):
+            start = start - pd.DateOffset(days=self.lag)
+        prc = target.universe.loc[start:end]['yieldcurve']
         prc_monthly = prc.copy()
         prc_monthly = prc_monthly.resample('BM').last().dropna()
-        print('monthly prc \n', prc_monthly)
-        ymomscore = WeighAMSwithCash.avg_momentum_score(prc_monthly['yieldcurve'], 6)       
-        print('ymomscore \n', ymomscore)
+        ymomscore = WeighAMSwithCash.avg_momentum_score(prc_monthly, self.ylookback)
+        yweight = ymomscore.loc[ymomscore.index.max()]
         
-        # 투자자산 모멘텀 산출용 데이터 추출
-        end = target.now - pd.DateOffset(days=self.lag)
-        start = end - pd.DateOffset(months=self.lookback+1)
-        #print('start day={}, end_day={}'.format(start, end))
+        # 투자자산 데이터 추출 & 모멘텀 가공
+        start = end - pd.DateOffset(months=self.lookback)
+        while not (start in target.universe.index):
+            start = start - pd.DateOffset(days=self.lag)
         prc = target.universe.loc[start:end, selected]
-        #print('price \n', prc)
-        prc_monthly = prc.copy()
+        prc_monthly = prc.copy().drop(['yieldcurve','cash'], axis=1)
         prc_monthly = prc_monthly.resample('BM').last().dropna()
-        #print('monthly prc \n', prc_monthly)
-        
-        momentum_score = WeighAMSwithCash.avg_momentum_score(prc_monthly, self.lookback)
-        
-        weights = pd.Series(momentum_score.loc[momentum_score.index.max()], index=momentum_score.columns)
-        weights = weights * ymomscore / (len(selected) - 2)
+        weights = WeighAMSwithCash.avg_momentum_score(prc_monthly, self.lookback)
+
+        # 전략수익률 곡선 모멘텀에 따른 현금 및 투자자산 비중 결정
+        weights = weights.loc[weights.index.max()]
+        weights = weights * yweight / len(weights.index)
+        weights['cash'] = 1 - weights.sum()
         weights['yieldcurve'] = 0
-        weights['cash'] = 1 - ymomscore
-        print('weights \n', weights)
+
         target.temp['weights'] = weights
         return True
 
