@@ -96,15 +96,17 @@ class WeighAMS(bt.Algo):
     """
     자산의 평균모멘텀점수를 계산하여 비중을 할당한다.
         Args:
-            lookback : 반추기간(기본값: 12개월)
             lag : 리밸런스 지연일(기본값: 1일)
             cash_weight : 현금 비중(기본값: 0)
+            returns : 전략 수익률 데이터
         Returns:
             target.temp['weights']에 평균모멘텀점수에 따른 비중을 반환
     """
-    def __init__(self, lookback=12, lag=1, cash_weight=0.0, returns=None, ylookback=0):
+    def __init__(self, lag=1, cash_weight=0.0, returns=pd.DataFrame(), ylookback=12):
+        if (not returns.empty) & (ylookback < 1):
+            raise ValueError("lookback of Yield can't be less than 0")
+        
         super(WeighAMS, self).__init__()
-        self.lookback = lookback
         self.lag = lag
         self.cash_weight = cash_weight
         self.returns = returns
@@ -128,8 +130,11 @@ class WeighAMS(bt.Algo):
         while not (end in target.universe.index):
             end = end - pd.DateOffset(days=self.lag)
 
+        s0 = target.now
+        if (not self.returns.empty) & (target.now >= s0):
+            s0 = self.returns.index.min() + pd.DateOffset(months=self.ylookback)
         # 전략수익률 데이터 추출 & 모멘텀 가공
-        if (self.ylookback != 0):
+        if (not self.returns.empty):
             start = end - pd.DateOffset(months=self.ylookback)
             while not (start in target.universe.index):
                 start = start - pd.DateOffset(days=self.lag)
@@ -140,7 +145,7 @@ class WeighAMS(bt.Algo):
             yweight = ymomscore.loc[ymomscore.index.max()]
         
         # 투자자산 반추기간 데이터 추출
-        start = end - pd.DateOffset(months=self.lookback)
+        start = end - pd.DateOffset(months=12)
         while not (start in target.universe.index):
             start = start - pd.DateOffset(days=self.lag)
         prc = target.universe.loc[start:end, selected]
@@ -148,11 +153,11 @@ class WeighAMS(bt.Algo):
         # 투자자산 모멘텀 산출
         prc_monthly = prc.copy().drop(['cash'], axis=1)
         prc_monthly = prc_monthly.resample('BM').last().dropna()
-        weights = WeighAMS.avg_momentum_score(prc_monthly, self.lookback)
+        weights = WeighAMS.avg_momentum_score(prc_monthly, lookback=12)
         
         # 투자자산 및 현금 비중 결정
         weights = weights.loc[weights.index.max()]
-        if (self.ylookback != 0):
+        if (not self.returns.empty) & (target.now >= s0):
             weights = weights * yweight.iloc[0] / len(weights.index)
         else:
             weights = weights * (1-self.cash_weight) / len(weights.index)
@@ -160,47 +165,47 @@ class WeighAMS(bt.Algo):
         target.temp['weights'] = weights
         return True
     
-class WeighInvVolByMonth(bt.Algo):
+class WeighInvVol_12(bt.Algo):
     """
     자산의 변동성을 산출하여 역가중 방식으로 비중을 할당한다.
         Args:
             lookback : 반추기간(기본값: 12개월)
             lag : 리밸런스 지연일(기본값: 1일)
+            returns : 전략 수익률 데이터
         Returns:
             target.temp['weights']에 변동성 역가중 방식에 따른 비중을 반환
     """
-    def __init__(self, lookback=12, lag=1, returns=None, ylookback=0):
-        super(WeighInvVolByMonth, self).__init__()
-        self.lookback = lookback;
+    def __init__(self,lag=1, returns=pd.DataFrame(), ylookback=12):
+        super(WeighInvVol_12, self).__init__()
         self.lag = lag
         self.returns = returns
-        self.ylookback = ylookback
+        self.ylookback=ylookback
         
     def __call__(self, target):
         selected = target.temp['selected']
         
         end = target.now - pd.DateOffset(days=self.lag)
+        while not (end in target.universe.index):
+            end = end - pd.DateOffset(days=self.lag)
         
+        s0 = target.now
+        if (not self.returns.empty):
+            s0 = self.returns.index.min() + pd.DateOffset(months=self.ylookback)
         # 전략수익률 데이터 추출 & 모멘텀 가공
-        if (self.ylookback != 0):
-            while not (end in target.universe.index):
-                end = end - pd.DateOffset(days=self.lag)
+        if (not self.returns.empty) & (target.now >= s0):
             start = end - pd.DateOffset(months=self.ylookback)
-            print('1start={}, end={}'.format(start, end))            
-            while not (start in self.returns.index):
+            while not (start in target.universe.index):
                 start = start - pd.DateOffset(days=self.lag)
-            print('2start={}, end={}'.format(start, end))
             prc = self.returns.loc[start:end]
             prc_monthly = prc.copy()
             prc_monthly = prc_monthly.resample('BM').last().dropna()
             ymomscore = WeighAMS.avg_momentum_score(prc_monthly, self.ylookback)
             yweight = ymomscore.loc[ymomscore.index.max()]
-            
                 
         # 투자자산 반추기간 데이터 추출            
-        start = end - pd.DateOffset(months=self.lookback+1)
+        start = end - pd.DateOffset(months=12)
         #print('start day={}, end_day={}'.format(start, end))
-        if (self.ylookback != 0):
+        if (not self.returns.empty) & (target.now >= s0):
             prc = target.universe.loc[start:end].drop(['cash'],axis=1).resample('BM').last()
         else:
             prc = target.universe.loc[start:end, selected].resample('BM').last()
@@ -208,10 +213,10 @@ class WeighInvVolByMonth(bt.Algo):
         # 투자자산 및 현금 비중 결정
         #print('monthly prc \n', prc)
         weights = (bt.ffn.calc_inv_vol_weights(prc.to_returns().dropna())).dropna()
-        if (self.ylookback != 0):
+        if (not self.returns.empty) & (target.now >= s0):
             weights = weights * yweight.iloc[0] / len(weights.index)
             weights['cash'] = 1- weights.sum()
-            
+        
         target.temp['weights'] = weights
         return True
         
