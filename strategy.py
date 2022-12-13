@@ -94,7 +94,7 @@ class SelectDualMomentum(bt.Algo):
     
 class WeighAMS(bt.Algo):
     """
-    자산의 평균모멘텀점수를 계산하여 비중을 할당한다.
+    전략수익률의 평균모멘텀에 따른 비중을 자산의 평균모멘텀점수와 곱하여 비중을 할당한다.
         Args:
             lag : 리밸런스 지연일(기본값: 1일)
             cash_weight : 현금 비중(기본값: 0)
@@ -181,6 +181,9 @@ class WeighAMS(bt.Algo):
         return True
 
 class WeighFixed(bt.Algo):
+    """
+    전략수익률의 평균모멘텀에 따른 비중을 자산의 고정 비중에 곱하여 투자 비중을 반환한다 
+    """
     def __init__(self, returns=pd.DataFrame(), lag=1, ylookback=12, **weights):
         super(WeighFixed, self).__init__()
         self.weights = pd.Series(weights)
@@ -201,13 +204,33 @@ class WeighFixed(bt.Algo):
         yweight = WeighAMS.amsofYield(self.returns, self.lag, self.ylookback, s0, end, target)
         
         # 투자자산 비중 가공
-        weights = self.weights
+        weights = self.weights.copy()
         if (not self.returns.empty) & (target.now >= s0):
             weights = self.weights * yweight.iloc[0]
             weights['cash'] = 1 - weights.sum()
             
         target.temp['weights'] = weights.copy()
         return True;
+    
+class WeighFixedWithCorr(bt.Algo):
+    """
+    
+    """
+    def __init__(self, corr, **weights):
+        super(WeighFixedWithCorr, self).__init__()
+        self.corr = corr
+        self.weights = pd.Series(weights)
+    
+    def __call__(self, target):
+        selected = target.temp['selected']
+        
+        weights = self.weights.copy()
+        if (self.corr[target.now] > 0.6):
+            weights['cash'] = self.weights[selected[1]]
+            weights[selected[1]] = 0
+        
+        target.temp['weights'] = weights.copy()
+        return True
     
 class WeighInvVol_12(bt.Algo):
     """
