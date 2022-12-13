@@ -1,5 +1,5 @@
-#import sys
-#sys.path.insert(0,"/workspace/bt")
+import sys
+sys.path.insert(0,"/workspace/bt")
 
 import numpy as np
 import pandas as pd
@@ -121,20 +121,35 @@ class WeighAMS(bt.Algo):
             sumOfscore = np.where(prc_monthly / prc_monthly.shift(i) > 1, 1,0) + sumOfscore
     
         sumOfmomentum[sumOfmomentum > 0] = sumOfscore/lookback
-        return sumOfmomentum        
+        return sumOfmomentum
+    
+    @staticmethod
+    def amsofYield(returns, lag, lookback, start, end, target):
+        yweight = None
+
+        if (not returns.empty) & (target.now >= start):
+            start = end - pd.DateOffset(months=lookback)
+            while not (start in target.universe.index):
+                start = start - pd.DateOffset(days=lag)
+            prc = returns.loc[start:end]
+            prc_monthly = prc.copy()
+            prc_monthly = prc_monthly.resample('BM').last().dropna()
+            ymomscore = WeighAMS.avg_momentum_score(prc_monthly, lookback)
+            yweight = ymomscore.loc[ymomscore.index.max()]
+        return yweight
     
     def __call__(self, target):
         selected = target.temp['selected']
-        
+
         end = target.now - pd.DateOffset(days=self.lag)
         while not (end in target.universe.index):
             end = end - pd.DateOffset(days=self.lag)
 
         s0 = target.now
-        if (not self.returns.empty) & (target.now >= s0):
+        if (not self.returns.empty):
             s0 = self.returns.index.min() + pd.DateOffset(months=self.ylookback)
         # 전략수익률 데이터 추출 & 모멘텀 가공
-        if (not self.returns.empty):
+        if (not self.returns.empty) & (target.now >= s0):
             start = end - pd.DateOffset(months=self.ylookback)
             while not (start in target.universe.index):
                 start = start - pd.DateOffset(days=self.lag)
@@ -164,6 +179,35 @@ class WeighAMS(bt.Algo):
         weights['cash'] = 1 - weights.sum()
         target.temp['weights'] = weights
         return True
+
+class WeighFixed(bt.Algo):
+    def __init__(self, returns=pd.DataFrame(), lag=1, ylookback=12, **weights):
+        super(WeighFixed, self).__init__()
+        self.weights = pd.Series(weights)
+        self.returns = returns
+        self.lag = lag
+        self.ylookback = ylookback
+        
+    def __call__(self, target):
+        selected = target.temp['selected']
+
+        end = target.now - pd.DateOffset(days=self.lag)
+        while not (end in target.universe.index):
+            end = end - pd.DateOffset(days=self.lag)   
+
+        s0 = target.now
+        if (not self.returns.empty):
+            s0 = self.returns.index.min() + pd.DateOffset(months=self.ylookback)            
+        yweight = WeighAMS.amsofYield(self.returns, self.lag, self.ylookback, s0, end, target)
+        
+        # 투자자산 비중 가공
+        weights = self.weights
+        if (not self.returns.empty) & (target.now >= s0):
+            weights = self.weights * yweight.iloc[0]
+            weights['cash'] = 1 - weights.sum()
+            
+        target.temp['weights'] = weights.copy()
+        return True;
     
 class WeighInvVol_12(bt.Algo):
     """
@@ -219,7 +263,7 @@ class WeighInvVol_12(bt.Algo):
         
         target.temp['weights'] = weights
         return True
-        
+
 class WeighADM(bt.Algo):
     """
     n개의 공격자산과 1개의 안전자산으로 구성된 투자자산(target.temp['selected'])에 가속듀얼모멘텀 방식으로 비중을 할당한다.
