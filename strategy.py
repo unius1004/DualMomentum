@@ -216,19 +216,38 @@ class WeighFixedWithCorr(bt.Algo):
     """
     
     """
-    def __init__(self, corr, **weights):
+    def __init__(self, lag, corr_df, corr, **weights):
         super(WeighFixedWithCorr, self).__init__()
+        self.lag = lag
+        self.corr_df = corr_df
         self.corr = corr
         self.weights = pd.Series(weights)
     
     def __call__(self, target):
         selected = target.temp['selected']
-        
+
         weights = self.weights.copy()
-        if (self.corr[target.now] > 0.6):
-            weights['cash'] = self.weights[selected[1]]
-            weights[selected[1]] = 0
+        if (self.corr_df[target.now] > self.corr):
+            # 투자자산 반추기간 데이터 추출        
+            end = target.now - pd.DateOffset(days=self.lag)
+            while not (end in target.universe.index):
+                end = end - pd.DateOffset(days=self.lag)        
+            start = end - pd.DateOffset(months=12)
+            while not (start in target.universe.index):
+                start = start - pd.DateOffset(days=self.lag)
+            prc = target.universe.loc[start:end, selected]
+
+            # 투자자산 모멘텀 산출
+            prc_monthly = prc.copy()
+            prc_monthly = prc_monthly.resample('BM').last().dropna()
+            weights = WeighAMS.avg_momentum_score(prc_monthly, lookback=12)
         
+            # 투자자산 및 현금 비중 결정
+            weights = weights.loc[weights.index.max()]
+            
+            weights = weights * self.weights
+            weights['cash'] = 1 - weights.sum()
+         
         target.temp['weights'] = weights.copy()
         return True
     
