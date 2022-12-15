@@ -17,7 +17,7 @@ class SelectRelativeMomentum(bt.Algo):
         
     def __call__(self, target):
         assets = target.universe.columns
-        end = target.now - self.lag
+        t0 = target.now - self.lag
         start = end - self.lookback
         prc = target.universe.loc[start:end, assets]
         momentum = prc.calc_total_return()
@@ -197,18 +197,15 @@ class WeighFixed(bt.Algo):
             t0 = t0 - pd.DateOffset(days=self.lag)
         
         # 수익율의 12개월 평균 모멘텀은 1년의 기간이 필요하다.
-        yweight = None
+        # 투자자산 비중 가공
+        weights = self.weights.copy()
         start = self.returns.index.min()
         if (not self.returns.empty):
             start = start + pd.DateOffset(months=self.ylookback)
-        if (not self.returns.empty) & (t0 >= start):
-            yweight = WeighAMS.amsofYield(self.returns, self.lag, self.ylookback, t0, target)
-        
-        # 투자자산 비중 가공
-        weights = self.weights.copy()
-        if (not self.returns.empty):
-            weights = self.weights * yweight.iloc[0]
-            weights['SAFE'] = 1 - weights.sum()
+            if (t0 >= start):
+                yweight = WeighAMS.amsofYield(self.returns, self.lag, self.ylookback, t0, target)
+                weights = self.weights * yweight.iloc[0]
+                weights['SAFE'] = 1 - weights.sum()
             
         target.temp['weights'] = weights.copy()
         return True;
@@ -217,12 +214,11 @@ class WeighFixedWithCorr(bt.Algo):
     """
     
     """
-    def __init__(self, lag, rolling, corr_df, corr, **weights):
+    def __init__(self, lag, rolling_corr, cval, **weights):
         super(WeighFixedWithCorr, self).__init__()
         self.lag = lag
-        self.rolling = rolling
-        self.corr_df = corr_df
-        self.corr = corr
+        self.rolling_corr = rolling_corr
+        self.cval = cval
         self.weights = pd.Series(weights)
     
     def __call__(self, target):
@@ -233,8 +229,8 @@ class WeighFixedWithCorr(bt.Algo):
             t0 = t0 - pd.DateOffset(days=self.lag)
 
         weights = self.weights.copy()
-        print('t0 = {}, corr_df.log[{}] = {} '.format(t0,t0,self.corr_df.loc[t0].values))
-        if (self.corr_df.loc[t0].values > self.corr)  | (self.corr_df.loc[t0].values < -self.corr):
+        s0 = target.universe.index.min() + pd.DateOffset(months=12)
+        if (t0 >= s0) & (self.rolling_corr.loc[t0].values > self.cval):
             # 투자자산 반추기간 데이터 추출        
             start = t0 - pd.DateOffset(months=12)
             while not (start in target.universe.index):
@@ -245,10 +241,9 @@ class WeighFixedWithCorr(bt.Algo):
             prc_monthly = prc.copy()
             prc_monthly = prc_monthly.resample('BM').last().dropna()
             weights = WeighAMS.avg_momentum_score(prc_monthly, lookback=12)
-        
-            # 투자자산 및 현금 비중 결정
             weights = weights.loc[weights.index.max()]
-            
+
+            # 투자자산 및 현금 비중 결정
             weights = weights * self.weights
             weights['SAFE'] = 1 - weights.sum()
          
