@@ -4,8 +4,10 @@ sys.path.insert(0,"/workspace/bt")
 import numpy as np
 import pandas as pd
 import bt
+#import ffn
 
 print('bt version : ', bt.__version__)
+#print('ffn version : ', ffn.__version__)
 
 #상대모멘텀 종목 선정
 class SelectRelativeMomentum(bt.Algo):
