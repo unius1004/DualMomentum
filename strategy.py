@@ -207,7 +207,7 @@ class WeighFixed(bt.Algo):
             if (t0 >= start):
                 yweight = WeighAMS.amsofYield(self.returns, self.lag, self.ylookback, t0, target)
                 weights = self.weights * yweight.iloc[0]
-                weights['SAFE'] = 1 - weights.sum()
+                weights['SAFE'] = 1 - weights.sum()                      
             
         target.temp['weights'] = weights.copy()
         return True;
