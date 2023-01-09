@@ -20,8 +20,8 @@ class SelectRelativeMomentum(bt.Algo):
     def __call__(self, target):
         assets = target.universe.columns
         t0 = target.now - self.lag
-        start = end - self.lookback
-        prc = target.universe.loc[start:end, assets]
+        start = t0 - self.lookback
+        prc = target.universe.loc[start:t0, assets]
         momentum = prc.calc_total_return()
         rank = momentum.rank(ascending=False)
         
